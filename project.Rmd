@@ -1,0 +1,158 @@
+Practical Machine Learning Project
+========================================================
+
+
+In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which participants did the exercise.   This is the "classe" variable in the training set. 
+
+
+
+
+
+```{r echo=FALSE}
+# First, set default to echo all code, cache the result and randomseed to 1.
+opts_chunk$set(echo=TRUE)
+opts_chunk$set(cache=TRUE)
+opts_chunk$set(message=FALSE)
+opts_chunk$set(warning=FALSE)
+set.seed(1)
+```
+
+
+
+##  Load package, load and preprocessing data
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+library(caret)
+```
+
+```{r}
+# Downloading the data
+dataUrl  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+file  <- "pml-training.csv"
+download.file(url=dataUrl, destfile=file, method="curl")
+
+# load data
+trainRawData <- read.csv("pml-training.csv",na.strings=c("NA",""))
+```
+
+There are missing data in the dataset, we remove the columns which contain missing data.
+```{r}
+# discard NAs
+col_NumNA <- apply(trainRawData,2,function(x) {sum(is.na(x))}) 
+# col_NumNA <- apply(trainRawData,2,function(x) {length(which((is.na(x))))}) 
+rmNAData <- trainRawData[, which(col_NumNA == 0)]
+```
+
+
+Separate the data into two data sets, we will train models on one dataset ( trainData ), and estimate the out of sample error on the other ( testErrorEstimateData ).  
+
+
+```{r}
+trainIndex <- createDataPartition(y = rmNAData$classe, p=0.2,list=FALSE) 
+trainData <- rmNAData[trainIndex,]
+testErrorEstimateData <- rmNAData[-trainIndex,]
+```
+
+
+
+##  Cross validation setting
+We set 10-fold cross validation to tune the parameters of the prediction models.
+
+```{r}
+fitControl <- trainControl("cv", number=10, repeats=10, classProbs=TRUE, savePred=T) 
+```
+
+##  Built the  model
+
+In this project, we tried two models,  Recursive Partitioning and Regression Trees (method="rpart"), and Random forest (method="rf").  
+
+R code and result for the Recursive Partitioning and Regression Trees model (method="rpart") are as below. 
+```{r, results='hide', cache=TRUE, message=FALSE, warning=FALSE}
+modFit_rpart <- train(trainData$classe ~., data = trainData, method="rpart", trControl=fitControl)
+```
+
+```{r}
+modFit_rpart
+train_pred <- predict(modFit_rpart, newdata=trainData)
+train_error_rpart <- confusionMatrix(data=trainData$classe, train_pred)
+train_error_rpart
+```
+
+
+R code and result for the Random forest model (method="rf") are as below. 
+```{r, cache=TRUE, results='hide', message=FALSE, warning=FALSE}
+#   Recursive Partitioning and Regression Trees (method="rpart")
+modFit_rf <- train(trainData$classe ~., data = trainData, method="rf", trControl=fitControl)
+```
+
+```{r}
+modFit_rf
+train_pred <- predict(modFit_rf, newdata=trainData)
+train_rf <- confusionMatrix(data=trainData$classe, train_pred)
+train_rf
+```
+
+```{r echo=FALSE}
+rf_acc <- round(train_rf[3]$overall["Accuracy"], 3) * 100
+rpart_acc <- round(train_error_rpart[3]$overall["Accuracy"], 3) * 100
+```
+From the error on the train data, we found that Random forest model has much higher accuracy than the Recursive Partitioning and Regression Trees model.  Specially, the trainning accuracy of the Random forest model is `r rf_acc`%, much larger than that of the Recursive Partitioning and Regression Trees model which is `r rpart_acc`%.  This can also be seen from the following bar-chart.  So we use the Random forest model as the final model.
+
+
+```{r echo=FALSE}
+train_accuracy <- c(rf_acc, rpart_acc)
+names(train_accuracy) <- c("Random forest", "Recursive Trees")
+barplot(train_accuracy, ylab="Train accuracy (%)", main="Accuracy of two different models")
+```
+
+
+
+##  The expected out of sample error
+We will compute the error on the left-out datset that we did not perform any training on it, so that we will get relatively realistic estimate of the out of sample error.
+
+```{r}
+testErrorEstimate_pred <- predict(modFit_rf, newdata=testErrorEstimateData)
+testErrorEstimate_rf <- confusionMatrix(data=testErrorEstimateData$classe, testErrorEstimate_pred)
+testErrorEstimate_rf
+```
+
+From this R code result, the expected out of sample error is very small and the expected out of sample accuracy is very high, which is `r round(testErrorEstimate_rf[3]$overall["Accuracy"], 3)*100`%.
+
+
+##  Prediction of 20 different test cases
+
+Finally, we will use the Random forest model to predict 20 different test cases.
+
+```{r}
+dataUrl  <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+file  <- "pml-testing.csv"
+download.file(url=dataUrl, destfile=file, method="curl")
+
+
+
+testRawData <- read.csv("pml-testing.csv",na.strings=c("NA",""))
+problem_id <- testRawData$problem_id
+testRawData$classe <- NA
+colind <- which(colnames(testRawData) %in% colnames(trainData))
+testData <- testRawData[, colind]
+
+# identical(colnames(trainData), colnames(testData))
+# [1] TRUE
+
+
+test_pred <- predict(modFit_rf, newdata=testData)
+answers <- as.character( test_pred )
+
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("./answers/problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
+
+After submitting this result to the Coursera programming assignment, the feedback confirm that the accruracy on these 20 different test cases is 100%.
+
